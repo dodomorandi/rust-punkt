@@ -137,7 +137,7 @@
 //! }
 //! ```
 
-#![warn(missing_docs)]
+#![cfg_attr(not(any(feature = "bench", test)), warn(missing_docs))]
 
 extern crate freqdist;
 extern crate num;
