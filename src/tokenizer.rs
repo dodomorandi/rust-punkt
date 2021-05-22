@@ -34,7 +34,7 @@ where
     #[inline(always)]
     pub fn new(doc: &'a str) -> PeriodContextTokenizer<'a, P> {
         PeriodContextTokenizer {
-            doc: doc,
+            doc,
             pos: 0,
             params: PhantomData,
         }
@@ -48,7 +48,7 @@ where
 
         while pos < self.doc.len() {
             let mut iter = self.doc[pos..].chars();
-            let cur = iter.nth(0).unwrap();
+            let cur = iter.next().unwrap();
 
             match cur {
                 // A whitespace is reached before a sentence ending character
@@ -208,7 +208,7 @@ where
     pub fn new(doc: &'a str) -> WordTokenizer<'a, P> {
         WordTokenizer {
             pos: 0,
-            doc: doc,
+            doc,
             params: PhantomData,
         }
     }
@@ -263,7 +263,7 @@ where
                         }
 
                         start = self.pos;
-                        is_ellipsis = s.ends_with(".");
+                        is_ellipsis = s.ends_with('.');
 
                         self.pos += s.len();
 
@@ -372,9 +372,9 @@ where
     #[inline(always)]
     pub fn new(doc: &'a str, data: &'a TrainingData) -> SentenceByteOffsetTokenizer<'a, P> {
         SentenceByteOffsetTokenizer {
-            doc: doc,
+            doc,
             iter: PeriodContextTokenizer::new(doc),
-            data: data,
+            data,
             last: 0,
             params: PhantomData,
         }
@@ -478,7 +478,7 @@ where
     #[inline(always)]
     pub fn new(doc: &'a str, data: &'a TrainingData) -> SentenceTokenizer<'a, P> {
         SentenceTokenizer {
-            doc: doc,
+            doc,
             iter: SentenceByteOffsetTokenizer::new(doc, data),
             params: PhantomData,
         }
@@ -509,7 +509,7 @@ where
 {
     use prelude::{BEG_LC, MID_UC, ORT_LC, ORT_UC};
 
-    if P::is_punctuation(&tok.tok().chars().nth(0).unwrap()) {
+    if P::is_punctuation(&tok.tok().chars().next().unwrap()) {
         Some(false)
     } else {
         let ctxt = data.get_orthographic_context(tok.typ_without_break_or_period());

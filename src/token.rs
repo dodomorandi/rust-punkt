@@ -35,9 +35,9 @@ pub struct Token {
 
 impl Token {
     pub fn new(slice: &str, is_el: bool, is_pg: bool, is_nl: bool) -> Token {
-        debug_assert!(slice.len() > 0);
+        debug_assert!(!slice.is_empty());
 
-        let first = slice.chars().nth(0).unwrap();
+        let first = slice.chars().next().unwrap();
         let mut has_punct = false;
 
         // Add a period to any tokens without a period. This is an optimization

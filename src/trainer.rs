@@ -42,7 +42,7 @@ where
 {
     #[inline(always)]
     pub fn new(l: T, r: T) -> Collocation<T> {
-        Collocation { l: l, r: r }
+        Collocation { l, r }
     }
 
     #[inline(always)]
@@ -314,8 +314,8 @@ where
         {
             let reclassify_iter: ReclassifyIterator<_, P> = ReclassifyIterator {
                 iter: tokens.iter(),
-                data: data,
-                period_token_count: period_token_count,
+                data,
+                period_token_count,
                 type_fdist: &mut type_fdist,
                 params: PhantomData,
             };
@@ -328,12 +328,10 @@ where
                                 .insert_abbrev(t.typ_without_period());
                         }
                     }
-                } else {
-                    if !t.has_final_period() {
-                        unsafe {
-                            (&mut *(data as *const TrainingData as *mut TrainingData))
-                                .remove_abbrev(t.typ_without_period());
-                        }
+                } else if !t.has_final_period() {
+                    unsafe {
+                        (&mut *(data as *const TrainingData as *mut TrainingData))
+                            .remove_abbrev(t.typ_without_period());
                     }
                 }
             }
@@ -401,7 +399,7 @@ where
             let ss_iter: PotentialSentenceStartersIterator<_, P> =
                 PotentialSentenceStartersIterator {
                     iter: sentence_starter_fdist.keys(),
-                    sentence_break_count: sentence_break_count,
+                    sentence_break_count,
                     type_fdist: &type_fdist,
                     sentence_starter_fdist: &sentence_starter_fdist,
                     params: PhantomData,
@@ -458,11 +456,7 @@ where
         } else if tok1.is_lowercase() {
             let ctxt = data.get_orthographic_context(tok1.typ_without_break_or_period());
 
-            if (ctxt & BEG_UC > 0) && !(ctxt & MID_UC > 0) {
-                true
-            } else {
-                false
-            }
+            (ctxt & BEG_UC > 0) && ctxt & MID_UC <= 0
         } else {
             false
         }
@@ -515,10 +509,8 @@ where
                 if self.data.contains_abbrev(t.typ()) {
                     continue;
                 }
-            } else {
-                if !self.data.contains_abbrev(t.typ()) {
-                    continue;
-                }
+            } else if !self.data.contains_abbrev(t.typ()) {
+                continue;
             }
 
             let num_periods =
@@ -768,10 +760,10 @@ preloaded_data!(turkish, "data/turkish.json");
 fn test_data_load_from_json_test() {
     let data: TrainingData = TrainingData::english();
 
-    assert!(data.orthographic_context.len() > 0);
-    assert!(data.abbrevs.len() > 0);
-    assert!(data.sentence_starters.len() > 0);
-    assert!(data.collocations.len() > 0);
+    assert!(!data.orthographic_context.is_empty());
+    assert!(!data.abbrevs.is_empty());
+    assert!(!data.sentence_starters.is_empty());
+    assert!(!data.collocations.is_empty());
     assert!(data.contains_sentence_starter("among"));
     assert!(data.contains_abbrev("w.va"));
     assert!(data.contains_collocation("##number##", "corrections"));
