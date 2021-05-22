@@ -137,8 +137,6 @@
 //! }
 //! ```
 
-#![cfg_attr(test, feature(test))]
-#![feature(proc_macro_hygiene)]
 #![warn(missing_docs)]
 
 extern crate freqdist;
@@ -146,15 +144,24 @@ extern crate num;
 extern crate phf;
 extern crate rustc_serialize;
 #[cfg(test)]
-extern crate test;
-#[cfg(test)]
 extern crate walkdir;
 
+#[cfg(feature = "bench")]
+pub mod prelude;
+
+#[cfg(not(feature = "bench"))]
 mod prelude;
+
 mod token;
 mod tokenizer;
 mod trainer;
 mod util;
+
+#[cfg(feature = "bench")]
+pub use token::Token;
+
+#[cfg(feature = "bench")]
+pub use tokenizer::{train_on_document, WordTokenizer};
 
 pub use tokenizer::{SentenceByteOffsetTokenizer, SentenceTokenizer};
 pub use trainer::{Trainer, TrainingData};

@@ -8,6 +8,13 @@ repository      = "https://github.com/ferristseng/rust-punkt"
 description     = "An implementation of a Punkt sentence tokenizer"
 readme          = "README.md"
 
+[[bench]]
+name = "benchmark"
+harness = false
+
+[features]
+bench = []
+
 [dependencies]
 num             = "0.1"
 phf             = { version = "0.7", features = ["macros"] }
@@ -15,4 +22,5 @@ rustc-serialize = "0.3"
 rust-freqdist   = "0.1"
 
 [dev-dependencies]
+criterion = "0.3.4"
 walkdir         = "0.1"
