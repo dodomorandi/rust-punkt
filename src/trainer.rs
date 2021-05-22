@@ -6,13 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
+use std::{cmp::min, ops::Not};
 
 use freqdist::FrequencyDistribution;
 use rustc_serialize::json::Json;
@@ -299,10 +299,10 @@ where
         let mut sentence_break_count: usize = 0;
         let tokens: Vec<Token> = WordTokenizer::<P>::new(doc).collect();
         let mut type_fdist: FrequencyDistribution<&str> = FrequencyDistribution::new();
-        let mut collocation_fdist = FrequencyDistribution::new();
+        let mut collocation_fdist = FrequencyDistribution::<Collocation<&Token>>::new();
         let mut sentence_starter_fdist = FrequencyDistribution::new();
 
-        for t in tokens.iter() {
+        for t in &tokens {
             if t.has_final_period() {
                 period_token_count += 1
             }
@@ -311,38 +311,62 @@ where
 
         // Iterate through to see if any tokens need to be reclassified as an
         // abbreviation or removed as an abbreviation.
-        {
-            let reclassify_iter: ReclassifyIterator<_, P> = ReclassifyIterator {
-                iter: tokens.iter(),
-                data,
-                period_token_count,
-                type_fdist: &mut type_fdist,
-                params: PhantomData,
+        for t in &tokens {
+            if t.is_non_punct().not() || t.is_numeric() {
+                continue;
+            }
+
+            if t.has_final_period() {
+                if data.contains_abbrev(t.typ()) {
+                    continue;
+                }
+            } else if data.contains_abbrev(t.typ()).not() {
+                continue;
+            }
+
+            let num_periods =
+                t.typ_without_period().chars().fold(
+                    0,
+                    |acc, c| {
+                        if c == '.' {
+                            acc + 1
+                        } else {
+                            acc
+                        }
+                    },
+                ) + 1;
+            let num_nonperiods = t.typ_without_period().chars().count() - num_periods + 1;
+
+            let count_with_period = type_fdist.get(t.typ_with_period());
+            let count_without_period = type_fdist.get(t.typ_without_period());
+
+            let likelihood = util::dunning_log_likelihood(
+                (count_with_period + count_without_period) as f64,
+                period_token_count as f64,
+                count_with_period as f64,
+                type_fdist.sum_counts() as f64,
+            );
+
+            let f_length = (-(num_nonperiods as f64)).exp();
+            let f_penalty = if P::IGNORE_ABBREV_PENALTY {
+                0f64
+            } else {
+                (num_nonperiods as f64).powi(-(count_without_period as i32))
             };
 
-            for (t, score) in reclassify_iter {
-                if score >= P::ABBREV_LOWER_BOUND {
-                    if t.has_final_period() {
-                        unsafe {
-                            (&mut *(data as *const TrainingData as *mut TrainingData))
-                                .insert_abbrev(t.typ_without_period());
-                        }
-                    }
-                } else if !t.has_final_period() {
-                    unsafe {
-                        (&mut *(data as *const TrainingData as *mut TrainingData))
-                            .remove_abbrev(t.typ_without_period());
-                    }
+            let score = likelihood * f_length * f_penalty * (num_periods as f64);
+
+            if score >= P::ABBREV_LOWER_BOUND {
+                if t.has_final_period() {
+                    data.insert_abbrev(t.typ_without_period());
                 }
+            } else if !t.has_final_period() {
+                data.remove_abbrev(t.typ_without_period());
             }
         }
 
-        // Annotating the tokens requires an unsafe block, but it won't modify any pointers,
-        // just will modify some flags on the tokens.
-        for t in tokens.iter() {
-            unsafe {
-                util::annotate_first_pass::<P>(&mut *(t as *const Token as *mut Token), data);
-            }
+        for t in &tokens {
+            util::annotate_first_pass::<P>(t, data);
         }
 
         // Update or insert the orthographic context of all tokens in the document.
@@ -410,18 +434,35 @@ where
             }
         }
 
-        {
-            let clc_iter: PotentialCollocationsIterator<_, P> = PotentialCollocationsIterator {
-                iter: collocation_fdist.keys(),
-                data: &data,
-                type_fdist: &type_fdist,
-                collocation_fdist: &collocation_fdist,
-                params: PhantomData,
-            };
+        for col in collocation_fdist.keys() {
+            if data.contains_sentence_starter(col.right().typ_without_break_or_period()) {
+                continue;
+            }
 
-            for (col, _) in clc_iter {
-                unsafe {
-                    (&mut *(data as *const TrainingData as *mut TrainingData)).insert_collocation(
+            let count = collocation_fdist.get(col);
+
+            let left_count = type_fdist.get(col.left().typ_without_period())
+                + type_fdist.get(col.left().typ_with_period());
+            let right_count = type_fdist.get(col.right().typ_without_period())
+                + type_fdist.get(col.right().typ_with_period());
+
+            if left_count > 1
+                && right_count > 1
+                && P::COLLOCATION_FREQUENCY_LOWER_BOUND < count as f64
+                && count <= min(left_count, right_count)
+            {
+                let likelihood = util::col_log_likelihood(
+                    left_count as f64,
+                    right_count as f64,
+                    count as f64,
+                    type_fdist.sum_counts() as f64,
+                );
+
+                if likelihood >= P::COLLOCATION_LOWER_BOUND
+                    && (type_fdist.sum_counts() as f64 / left_count as f64)
+                        > (right_count as f64 / count as f64)
+                {
+                    data.insert_collocation(
                         col.left().typ_without_period(),
                         col.right().typ_without_break_or_period(),
                     );
@@ -480,72 +521,6 @@ where
             && tok1.is_non_punct()
 }
 
-/// Iterates over every token from the supplied iterator. Only returns
-/// the ones that are 'not obviously' abbreviations. Also returns the associated
-/// score of that token.
-struct ReclassifyIterator<'b, I, P> {
-    iter: I,
-    data: &'b TrainingData,
-    period_token_count: usize,
-    type_fdist: &'b FrequencyDistribution<&'b str>,
-    params: PhantomData<P>,
-}
-
-impl<'b, I, P> Iterator for ReclassifyIterator<'b, I, P>
-where
-    I: Iterator<Item = &'b Token>,
-    P: TrainerParameters,
-{
-    type Item = (&'b Token, f64);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(t) = self.iter.next() {
-            if !t.is_non_punct() || t.is_numeric() {
-                continue;
-            }
-
-            if t.has_final_period() {
-                if self.data.contains_abbrev(t.typ()) {
-                    continue;
-                }
-            } else if !self.data.contains_abbrev(t.typ()) {
-                continue;
-            }
-
-            let num_periods =
-                t.typ_without_period()
-                    .chars()
-                    .fold(0, |acc, c| if c == '.' { acc + 1 } else { acc })
-                    + 1;
-            let num_nonperiods = t.typ_without_period().chars().count() - num_periods + 1;
-
-            let count_with_period = self.type_fdist.get(t.typ_with_period());
-            let count_without_period = self.type_fdist.get(t.typ_without_period());
-
-            let likelihood = util::dunning_log_likelihood(
-                (count_with_period + count_without_period) as f64,
-                self.period_token_count as f64,
-                count_with_period as f64,
-                self.type_fdist.sum_counts() as f64,
-            );
-
-            let f_length = (-(num_nonperiods as f64)).exp();
-            let f_penalty = if P::IGNORE_ABBREV_PENALTY {
-                0f64
-            } else {
-                (num_nonperiods as f64).powi(-(count_without_period as i32))
-            };
-
-            let score = likelihood * f_length * f_penalty * (num_periods as f64);
-
-            return Some((t, score));
-        }
-
-        None
-    }
-}
-
 struct TokenWithContextIterator<I> {
     iter: I,
     ctxt: OrthographyPosition,
@@ -589,63 +564,6 @@ where
             }
             None => None,
         }
-    }
-}
-
-struct PotentialCollocationsIterator<'b, I, P> {
-    iter: I,
-    data: &'b TrainingData,
-    type_fdist: &'b FrequencyDistribution<&'b str>,
-    collocation_fdist: &'b FrequencyDistribution<Collocation<&'b Token>>,
-    params: PhantomData<P>,
-}
-
-impl<'a, 'b, I, P> Iterator for PotentialCollocationsIterator<'b, I, P>
-where
-    I: Iterator<Item = &'a Collocation<&'a Token>>,
-    P: TrainerParameters,
-{
-    type Item = (&'a Collocation<&'a Token>, f64);
-
-    #[inline]
-    fn next(&mut self) -> Option<(&'a Collocation<&'a Token>, f64)> {
-        while let Some(col) = self.iter.next() {
-            if self
-                .data
-                .contains_sentence_starter(col.right().typ_without_break_or_period())
-            {
-                continue;
-            }
-
-            let count = self.collocation_fdist.get(col);
-
-            let left_count = self.type_fdist.get(col.left().typ_without_period())
-                + self.type_fdist.get(col.left().typ_with_period());
-            let right_count = self.type_fdist.get(col.right().typ_without_period())
-                + self.type_fdist.get(col.right().typ_with_period());
-
-            if left_count > 1
-                && right_count > 1
-                && P::COLLOCATION_FREQUENCY_LOWER_BOUND < count as f64
-                && count <= min(left_count, right_count)
-            {
-                let likelihood = util::col_log_likelihood(
-                    left_count as f64,
-                    right_count as f64,
-                    count as f64,
-                    self.type_fdist.sum_counts() as f64,
-                );
-
-                if likelihood >= P::COLLOCATION_LOWER_BOUND
-                    && (self.type_fdist.sum_counts() as f64 / left_count as f64)
-                        > (right_count as f64 / count as f64)
-                {
-                    return Some((col, likelihood));
-                }
-            }
-        }
-
-        None
     }
 }
 
