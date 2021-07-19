@@ -256,8 +256,8 @@ where
                 // one exists return it, and modify `self.pos`. Otherwise, continue.
                 // If a capture has begin, or a comma was encountered, return the token
                 // before this multi-char.
-                '.' | '-' => match is_multi_char(self.doc, self.pos) {
-                    Some(s) => {
+                '.' | '-' => {
+                    if let Some(s) = is_multi_char(self.doc, self.pos) {
                         if state & CAPTURE_START != 0 || state & CAPTURE_COMMA != 0 {
                             return_token!()
                         }
@@ -269,8 +269,7 @@ where
 
                         return_token!()
                     }
-                    None => (),
-                },
+                }
                 // Not a potential multi-char start, continue...
                 _ => (),
             }
@@ -391,7 +390,7 @@ where
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<(usize, usize)> {
-        while let Some((slice, tok_start, ws_start, slice_end, len)) = self.iter.next() {
+        for (slice, tok_start, ws_start, slice_end, len) in &mut self.iter {
             let mut prv = None;
             let mut has_sentence_break = false;
 
@@ -399,20 +398,17 @@ where
             // then set the flag `has_sentence_break`.
             for mut t in WordTokenizer::<P>::new(slice) {
                 // First pass annotation can occur for each token...
-                ::util::annotate_first_pass::<P>(&mut t, self.data);
+                ::util::annotate_first_pass::<P>(&t, self.data);
 
                 // Second pass annotation is a bit more finicky...It depends on the
                 // previous token that was found.
-                match prv {
-                    Some(mut p) => {
-                        annotate_second_pass::<P>(&mut t, &mut p, self.data);
+                if let Some(mut p) = prv {
+                    annotate_second_pass::<P>(&mut t, &mut p, self.data);
 
-                        if p.is_sentence_break() {
-                            has_sentence_break = true;
-                            break;
-                        }
+                    if p.is_sentence_break() {
+                        has_sentence_break = true;
+                        break;
                     }
-                    None => (),
                 }
 
                 prv = Some(t);
@@ -671,7 +667,7 @@ pub fn train_on_document(data: &mut TrainingData, doc: &str) {
     use trainer::Trainer;
 
     let trainer: Trainer<::prelude::Standard> = Trainer::new();
-    trainer.train(&doc, data);
+    trainer.train(doc, data);
 }
 
 #[test]

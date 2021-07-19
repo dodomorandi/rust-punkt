@@ -184,12 +184,9 @@ impl TrainingData {
     fn insert_orthographic_context(&mut self, tok: &str, ctxt: OrthographicContext) -> bool {
         // `get_mut` isn't allowed here, without adding an unnecessary lifetime
         // qualifier to `tok`.
-        match self.orthographic_context.get_mut(tok) {
-            Some(c) => {
-                *c |= ctxt;
-                return false;
-            }
-            None => (),
+        if let Some(c) = self.orthographic_context.get_mut(tok) {
+            *c |= ctxt;
+            return false;
         }
 
         self.orthographic_context.insert(tok.to_string(), ctxt);
@@ -250,7 +247,7 @@ impl FromStr for TrainingData {
                         (Some(Json::String(r)), Some(Json::String(l))) => data
                             .collocations
                             .entry(l)
-                            .or_insert(HashSet::new())
+                            .or_insert_with(HashSet::new)
                             .insert(r),
                         _ => return Err("failed to parse collocations section"),
                     };
@@ -281,6 +278,18 @@ pub struct Trainer<P> {
     params: PhantomData<P>,
 }
 
+impl<P> Default for Trainer<P>
+where
+    P: TrainerParameters + DefinesNonPrefixCharacters + DefinesNonWordCharacters,
+{
+    #[inline(always)]
+    fn default() -> Self {
+        Trainer {
+            params: PhantomData,
+        }
+    }
+}
+
 impl<P> Trainer<P>
 where
     P: TrainerParameters + DefinesNonPrefixCharacters + DefinesNonWordCharacters,
@@ -288,9 +297,7 @@ where
     /// Creates a new Trainer.
     #[inline(always)]
     pub fn new() -> Trainer<P> {
-        Trainer {
-            params: PhantomData,
-        }
+        Self::default()
     }
 
     /// Train on a document. Does tokenization using a WordTokenizer.
@@ -402,7 +409,7 @@ where
             for (lt, rt) in consecutive_token_iter {
                 match rt {
                     Some(cur) if lt.has_final_period() => {
-                        if is_rare_abbrev_type::<P>(&data, &type_fdist, lt, cur) {
+                        if is_rare_abbrev_type::<P>(data, &type_fdist, lt, cur) {
                             data.insert_abbrev(lt.typ_without_period());
                         }
 
@@ -497,7 +504,7 @@ where
         } else if tok1.is_lowercase() {
             let ctxt = data.get_orthographic_context(tok1.typ_without_break_or_period());
 
-            (ctxt & BEG_UC > 0) && ctxt & MID_UC <= 0
+            (ctxt & BEG_UC > 0) && ctxt & MID_UC == 0
         } else {
             false
         }
@@ -584,7 +591,7 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<(&'a Token, f64)> {
-        while let Some(tok) = self.iter.next() {
+        for tok in &mut self.iter {
             let ss_count = self.sentence_starter_fdist.get(tok);
             let typ_count = self.type_fdist.get(tok.typ_with_period())
                 + self.type_fdist.get(tok.typ_without_period());

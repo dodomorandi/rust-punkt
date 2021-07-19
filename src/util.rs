@@ -48,12 +48,12 @@ pub fn col_log_likelihood(count_a: f64, count_b: f64, count_ab: f64, n: f64) -> 
 
     let s1 = count_ab * p.ln() + (count_a - count_ab) * (1.0 - p).ln();
     let s2 = (count_b - count_ab) * p.ln() + (n - count_a - count_b + count_ab) * (1.0 - p).ln();
-    let s3 = if count_a == count_ab {
+    let s3 = if (count_a - count_ab).abs() < f64::EPSILON {
         0f64
     } else {
         count_ab * p1.ln() + (count_a - count_ab) * (1.0 - p1).ln()
     };
-    let s4 = if count_b == count_ab {
+    let s4 = if (count_b - count_ab).abs() < f64::EPSILON {
         0f64
     } else {
         (count_b - count_ab) * p2.ln() + (n - count_a - count_b + count_ab) * (1.0 - p2).ln()
